@@ -1,0 +1,55 @@
+---
+- name: Deploy Prometheus, Grafana, Istio, and Kubecost
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Add Prometheus Community Helm Chart Repository
+      command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+
+    - name: Install Prometheus
+      command: helm install prometheus prometheus-community/prometheus
+
+    - name: Wait for Prometheus Pods to be Ready
+      command: kubectl wait --for=condition=Ready pods --all -n default --timeout=300s
+
+    - name: Install Grafana Community Helm Chart Repository
+      command: helm repo add grafana https://grafana.github.io/helm-charts
+
+    - name: Install Grafana
+      command: helm install grafana grafana/grafana
+
+    - name: Wait for Grafana Pods to be Ready
+      command: kubectl wait --for=condition=Ready pods --all -n default --timeout=300s
+
+    - name: Expose Prometheus via NodePort
+      command: kubectl expose service prometheus-server --type=NodePort --target-port=9090 --name=prometheus-server-np
+
+    - name: Expose Grafana via NodePort
+      command: kubectl expose service grafana --type=NodePort --target-port=3000 --name=grafana-np
+
+    - name: Get Prometheus NodePort
+      command: kubectl get svc prometheus-server-np -o jsonpath='{.spec.ports[0].nodePort}'
+      register: prometheus_nodeport
+
+    - name: Get Grafana NodePort
+      command: kubectl get svc grafana-np -o jsonpath='{.spec.ports[0].nodePort}'
+      register: grafana_nodeport
+
+    - name: Create a namespace istio-system for Istio components
+      command: kubectl create namespace istio-system
+
+    - name: Install Istio base chart
+      command: helm install istio-base istio/base -n istio-system
+
+    - name: Install Istio discovery chart
+      command: helm install istiod istio/istiod -n istio-system --wait
+
+    - name: Create a namespace kubecost for Kubecost
+      command: kubectl create namespace kubecost
+
+    - name: Install Kubecost using Helm
+      command: helm upgrade --install kubecost \
+        --repo https://kubecost.github.io/cost-analyzer/ cost-analyzer \
+        --namespace kubecost --create-namespace
+

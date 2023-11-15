@@ -1,0 +1,5 @@
+[jenkins-server]
+34.105.231.231 
+
+[jenkins-server:vars]
+ansible_ssh_private_key_file=/opt/ansible/inventory/ansible-key

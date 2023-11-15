@@ -1,0 +1,6 @@
+---
+plugin: gcp_compute
+projects:
+  - checklist-392719
+auth_kind: serviceaccount
+service_account_file: /opt/ansible/inventory/service-account.json

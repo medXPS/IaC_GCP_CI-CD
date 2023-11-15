@@ -1,0 +1,57 @@
+---
+- name: Install Jenkins on Debian/Ubuntu
+  hosts: jenkins-server
+  become: yes
+  tasks:
+    - name: Install prerequisites
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - wget
+        - apt-transport-https
+        - software-properties-common
+        - dirmngr
+        - ca-certificates
+
+    - name: Add Jenkins repository key
+      command: sudo wget -O /usr/share/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+      become: yes
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/
+        state: present
+      become: yes
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Java (OpenJDK 17)
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - fontconfig
+        - openjdk-17-jdk
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+
+    - name: Start Jenkins service
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  handlers:
+    - name: restart jenkins
+      service:
+        name: jenkins
+        state: restarted

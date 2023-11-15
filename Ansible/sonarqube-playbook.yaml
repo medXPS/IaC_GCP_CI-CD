@@ -1,0 +1,202 @@
+---
+- name: Install and Configure SonarQube
+  hosts: jenkins-server
+  become: yes
+  vars:
+    sonar_db_username: sonar
+    sonar_db_password: sonar
+
+  tasks:
+    - name: Remove existing pgdg.list file
+      file:
+        path: /etc/apt/sources.list.d/pgdg.list
+        state: absent
+      become: yes
+
+    - name: Create PostgreSQL repository list file
+      copy:
+        content: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+        dest: /etc/apt/sources.list.d/pgdg.list
+      become: yes
+
+    - name: Add PostgreSQL signing key
+      shell: wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+      become: yes
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      become: yes
+
+    - name: Install required packages including psycopg2
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - wget
+        - ca-certificates
+        - postgresql
+        - postgresql-contrib
+        - unzip
+        - python3-psycopg2
+      become: yes
+
+    - name: Enable and start PostgreSQL service
+      systemd:
+        name: postgresql
+        enabled: yes
+        state: started
+      become: yes
+
+    - name: Set 'trust' authentication method for local connections in PostgreSQL
+      lineinfile:
+        path: /etc/postgresql/16/main/pg_hba.conf
+        line: "local    all             all                                     trust"
+        insertafter: "^# TYPE DATABASE USER"
+      become: yes
+
+    - name: Reload PostgreSQL to apply changes
+      systemd:
+        name: postgresql
+        state: reloaded
+      become: yes
+
+    - name: Change default PostgreSQL password for the postgres user
+      user:
+        name: postgres
+        password: "{{ sonar_db_password }}"
+      become: yes
+
+    - name: Create a user named sonar in PostgreSQL
+      command: sudo -u postgres createuser -U postgres sonar
+      become_user: postgres
+      become: yes
+
+    - name: Set password for the sonar user in PostgreSQL
+      command: sudo -u postgres psql -c "ALTER USER sonar WITH ENCRYPTED PASSWORD 'sonar';"
+      become_user: postgres
+      become: yes
+
+    - name: Create the sonarqube database in PostgreSQL
+      command: sudo -u postgres psql -c "CREATE DATABASE sonarqube OWNER sonar;"
+      become_user: postgres
+      become: yes
+
+    - name: Grant privileges on the sonarqube database to the sonar user in PostgreSQL
+      command: sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sonarqube TO sonar;"
+      become_user: postgres
+      become: yes
+
+    - name: Download SonarQube
+      get_url:
+        url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-8.9.9.56886.zip"
+        dest: "/tmp/sonarqube-8.9.9.56886.zip"
+      become: yes
+
+    - name: Unzip SonarQube
+      unarchive:
+        src: "/tmp/sonarqube-8.9.9.56886.zip"
+        dest: "/opt/"
+        remote_src: yes
+      become: yes
+
+    - name: Remove existing SonarQube directory if it exists
+      file:
+        path: /opt/sonarqube
+        state: absent
+      become: yes
+      ignore_errors: yes
+
+    - name: Rename directory to sonarqube
+      command: mv /opt/sonarqube-8.9.9.56886 /opt/sonarqube
+      become: yes
+
+    - name: Create sonar group
+      group:
+        name: sonar
+        state: present
+      become: yes
+
+    - name: Create sonar user
+      user:
+        name: sonar
+        group: sonar
+        home: /opt/sonarqube
+        state: present
+      become: yes
+
+    - name: Grant access to sonar user
+      file:
+        path: /opt/sonarqube
+        owner: sonar
+        group: sonar
+        recurse: yes
+      become: yes
+
+    - name: Set database configuration in sonar.properties
+      blockinfile:
+        path: /opt/sonarqube/conf/sonar.properties
+        block: |
+          sonar.jdbc.username={{ sonar_db_username }}
+          sonar.jdbc.password={{ sonar_db_password }}
+          sonar.jdbc.url=jdbc:postgresql://localhost:5432/sonarqube
+      become: yes
+
+    - name: Modify sonar script file
+      lineinfile:
+        path: /opt/sonarqube/bin/linux-x86-64/sonar.sh
+        regexp: '^#RUN_AS_USER='
+        line: 'RUN_AS_USER=sonar'
+      become: yes
+
+    - name: Create the empty systemd service file
+      command: touch /etc/systemd/system/sonar.service
+      become: yes
+
+    - name: Create systemd service file for SonarQube
+      blockinfile:
+        path: /etc/systemd/system/sonar.service
+        block: |
+          [Unit]
+          Description=SonarQube service
+          After=syslog.target network.target
+
+          [Service]
+          Type=forking
+          ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh start
+          ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
+          User=sonar
+          Group=sonar
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+      become: yes
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+      become: yes
+
+    - name: Enable and start SonarQube service
+      systemd:
+        name: sonar
+        enabled: yes
+        state: started
+      become: yes
+
+    - name: Modify Kernel System Limits
+      lineinfile:
+        path: /etc/sysctl.conf
+        line: "{{ item }}"
+      loop:
+        - "vm.max_map_count=262144"
+        - "fs.file-max=65536"
+        - "ulimit -n 65536"
+        - "ulimit -u 4096"
+      become: yes
+
+    - name: Reboot the system
+      reboot:
+        reboot_timeout: 300
+        test_command: uptime
