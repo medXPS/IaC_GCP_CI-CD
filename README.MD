@@ -1,1 +1,2 @@
-
+to Adjust the configuration execute "sudo pip install requests google-auth"  of ansible change gcp.yaml , /etc/ansible/ansible.cfg, hosts, add your service-account secret file and public  SSH key to Gcompute engine 
+Use Gcloud SDK to interact/configure your GKE Cluster using anisble playbooks 
